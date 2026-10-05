@@ -24,6 +24,12 @@ class EvalTask:
     expected_tool: str | None = None
     tool_arguments: dict[str, Any] = field(default_factory=dict)
     expected_substrings: list[str] = field(default_factory=list)
+    #: 多步任务：期望按顺序调用的工具（例如先 grep 再 read_file）
+    expected_tools: list[str] = field(default_factory=list)
+    #: 不应被调用的工具（用于验证"不过度调用工具"）
+    forbidden_tools: list[str] = field(default_factory=list)
+    #: 离线模式下的脚本：每一步 {"tool": ..., "arguments": {...}}
+    steps: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -50,6 +56,8 @@ class ScriptedEvalLLM:
         self.task = task
         self.calls = 0
         self.model = "scripted-eval-llm"
+        self._steps = scripted_steps(task)
+        self._cursor = 0
 
     async def chat(
         self,
@@ -58,14 +66,16 @@ class ScriptedEvalLLM:
     ) -> LLMResponse:
         self.calls += 1
 
-        if self.calls == 1 and self.task.expected_tool:
+        if self._cursor < len(self._steps):
+            step = self._steps[self._cursor]
+            self._cursor += 1
             return LLMResponse(
                 content=None,
                 tool_calls=[
                     ToolCall(
-                        id=f"{self.task.id}_call_1",
-                        name=self.task.expected_tool,
-                        arguments=self.task.tool_arguments,
+                        id=f"{self.task.id}_call_{self._cursor}",
+                        name=step.get("tool", ""),
+                        arguments=step.get("arguments", {}),
                     )
                 ],
             )
@@ -76,11 +86,38 @@ class ScriptedEvalLLM:
         return LLMResponse(content="No tool was required.")
 
 
+def scripted_steps(task: EvalTask) -> list[dict[str, Any]]:
+    """离线脚本：优先用 steps，其次兼容旧字段 expected_tool + tool_arguments。"""
+    if task.steps:
+        return list(task.steps)
+    if task.expected_tool:
+        return [{"tool": task.expected_tool, "arguments": task.tool_arguments}]
+    return []
+
+
+def expected_tools_of(task: EvalTask) -> list[str]:
+    """本任务期望调用的工具（按顺序）。"""
+    if task.expected_tools:
+        return list(task.expected_tools)
+    if task.expected_tool:
+        return [task.expected_tool]
+    return []
+
+
+def is_ordered_subsequence(expected: list[str], actual: list[str]) -> bool:
+    """expected 是否是 actual 的有序子序列（允许中间夹杂其它工具）。"""
+    cursor = 0
+    for name in actual:
+        if cursor < len(expected) and name == expected[cursor]:
+            cursor += 1
+    return cursor == len(expected)
+
+
 def load_tasks(path: str | Path) -> list[EvalTask]:
     tasks: list[EvalTask] = []
     with Path(path).open("r", encoding="utf-8") as f:
-        for line_no, line in enumerate(f, 1):
-            line = line.strip()
+        for line_no, raw_line in enumerate(f, 1):
+            line = raw_line.strip()
             if not line or line.startswith("#"):
                 continue
             data = json.loads(line)
@@ -98,13 +135,17 @@ async def run_eval_tasks(
     out_dir: str | Path,
 ) -> list[EvalResult]:
     out_path = Path(out_dir)
-    out_path.mkdir(parents=True, exist_ok=True)
+
+    def _prepare_trace(name: str) -> Path:
+        """创建输出目录并重置该任务的 trace 文件（阻塞 IO，放在线程里执行）。"""
+        out_path.mkdir(parents=True, exist_ok=True)
+        path = out_path / f"{name}.trace.jsonl"
+        path.unlink(missing_ok=True)
+        return path
 
     results: list[EvalResult] = []
     for task in tasks:
-        trace_path = out_path / f"{task.id}.trace.jsonl"
-        if trace_path.exists():
-            trace_path.unlink()
+        trace_path = await asyncio.to_thread(_prepare_trace, task.id)
 
         tracer = TraceRecorder(trace_path, run_id=task.id)
         llm = ScriptedEvalLLM(task) if offline else LLMClient()
@@ -118,8 +159,13 @@ async def run_eval_tasks(
         ]
         failures: list[str] = []
 
-        if task.expected_tool and task.expected_tool not in called_tools:
-            failures.append(f"expected tool '{task.expected_tool}', got {called_tools}")
+        expected = expected_tools_of(task)
+        if expected and not is_ordered_subsequence(expected, called_tools):
+            failures.append(f"expected tools {expected} in order, got {called_tools}")
+
+        for banned in task.forbidden_tools:
+            if banned in called_tools:
+                failures.append(f"tool '{banned}' should not be called, got {called_tools}")
 
         for needle in task.expected_substrings:
             if needle not in final_answer:
@@ -148,10 +194,16 @@ def write_reports(results: list[EvalResult], out_dir: Path) -> None:
     )
 
     passed = sum(1 for result in results if result.passed)
+    total = len(results)
+    rate = (passed / total * 100) if total else 0.0
+    covered = sorted({tool for result in results for tool in result.called_tools})
+
     lines = [
         "# nanogent Eval Report",
         "",
-        f"Passed: {passed} / {len(results)}",
+        f"**Passed: {passed} / {total} ({rate:.0f}%)**",
+        "",
+        f"Tools exercised: {', '.join(covered) if covered else '-'}",
         "",
         "| Task | Passed | Tools | Trace |",
         "| --- | --- | --- | --- |",

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 from nanogent.tools import (
-    FunctionTool,
     Tool,
     create_default_registry,
     load_plugin_tools,
@@ -41,9 +40,10 @@ class EchoTool(Tool):
 
 
 class FakeEntryPoint:
-    def __init__(self, obj, should_fail=False):
+    def __init__(self, obj, should_fail=False, name="fake"):
         self._obj = obj
         self._should_fail = should_fail
+        self.name = name
 
     def load(self):
         if self._should_fail:

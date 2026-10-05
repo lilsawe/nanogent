@@ -7,7 +7,11 @@ endpoint, with support for tool/function calling.
 
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
+
+from openai import AsyncOpenAI
+
+from nanogent.errors import ConfigError, LLMError
 
 API_KEY_ENV_VARS = ("NANOGENT_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY")
 
@@ -19,8 +23,6 @@ def _first_env(names: tuple[str, ...]) -> str | None:
         if value:
             return value
     return None
-
-from openai import AsyncOpenAI
 
 
 @dataclass
@@ -42,6 +44,23 @@ class LLMResponse:
         return len(self.tool_calls) > 0
 
 
+@runtime_checkable
+class ChatModel(Protocol):
+    """Agent 需要的最小模型接口。
+
+    任何实现 "model" 属性与 "async chat(messages, tools)" 的对象都可注入 Agent——
+    这让离线评测可以注入脚本化模型，测试也不必依赖真实 API。
+    """
+
+    model: str
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> "LLMResponse": ...
+
+
 class LLMClient:
     """
     Async client for DeepSeek's chat completion API.
@@ -61,12 +80,12 @@ class LLMClient:
     ):
         self.api_key = api_key or _first_env(API_KEY_ENV_VARS)
         if not self.api_key:
-            raise ValueError(
+            raise ConfigError(
                 "No API key found. Set one of " + ", ".join(API_KEY_ENV_VARS)
                 + " (e.g. export NANOGENT_API_KEY=sk-...), or pass --api-key."
             )
 
-        self.model = model or os.getenv("NANOGENT_MODEL", "deepseek-chat")
+        self.model: str = model or os.getenv("NANOGENT_MODEL") or "deepseek-chat"
         self.base_url = base_url or os.getenv("NANOGENT_BASE_URL", "https://api.deepseek.com")
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -108,7 +127,7 @@ class LLMClient:
         try:
             completion = await self._client.chat.completions.create(**kwargs)
         except Exception as e:
-            raise Exception(f"LLM API error: {e}") from e
+            raise LLMError(f"LLM API error: {e}") from e
 
         choice = completion.choices[0]
         message = choice.message

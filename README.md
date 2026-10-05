@@ -39,7 +39,7 @@ nanogent                                        # 交互模式
 - 使用 `asyncio` 封装 LLM 调用和工具执行
 - JSONL tracing：记录 user message、LLM request/response、tool_call、tool_result、final_response
 - Evaluation harness：用 JSONL 任务集评估工具调用链路，输出 JSON + Markdown 报告
-- **44 个单元测试**，覆盖工具系统（含函数工具与插件发现）、计算器安全边界、Agent tool-call、tracing、eval、会话与 CLI
+- **66 个单元测试**，覆盖工具系统（含函数工具与插件发现）、计算器安全边界、Agent tool-call、tracing、eval、会话与 CLI
 
 ## Architecture
 
@@ -310,6 +310,51 @@ plus machine-readable JSON results.
 | `web_search` | Placeholder search tool that shows how a tool call flows through the loop |
 | `glob` | Finds files by glob pattern (e.g. **/*.py), newest first, skips .git/venv/target |
 | `grep` | Regex search across files, returns file:line: text; supports include filter |
+
+## 评测（Eval）
+
+任务集是 JSONL，每条声明期望调用的工具、参数与期望输出片段：
+
+§§§json
+{"id": "multi_step_grep_then_read",
+ "prompt": "先在 evals/fixtures 里搜索 TODO，然后读取命中的文件。",
+ "steps": [{"tool": "grep", "arguments": {"pattern": "TODO", "path": "evals/fixtures"}},
+           {"tool": "read_file", "arguments": {"path": "evals/fixtures/sample.py"}}],
+ "expected_tools": ["grep", "read_file"],
+ "expected_substrings": ["TODO"]}
+§§§
+
+§§§bash
+# 离线：用脚本化模型验证「Agent 循环 + 工具执行 + trace + 报告」这条链路（无需 API Key）
+nanogent-eval --offline --tasks evals/tool_call_tasks.jsonl --out-dir eval_runs
+
+# 真实模型：给出真实通过率
+export NANOGENT_API_KEY=sk-xxx
+nanogent-eval --tasks evals/tool_call_tasks.jsonl --out-dir eval_runs
+§§§
+
+**当前离线自检结果**：
+
+| 指标 | 数值 |
+|---|---|
+| 任务数 | **19** |
+| 通过率 | **19 / 19（100%）** |
+| 覆盖工具 | **7 / 7**（calculator · execute_python · read_file · write_file · glob · grep · web_search） |
+
+> ⚠️ 离线模式用**脚本化模型**，验证的是「评测链路本身是通的」，**不代表模型能力**；
+> 真实通过率需要带 API Key 跑一次（上面第二条命令）。CI 只跑离线自检，保证任务集与评测代码不腐化。
+
+支持的能力：单步 / **多步任务**、**forbidden_tools**（验证「不该调工具时不调」）、**有序子序列校验**（允许中间夹杂其它工具调用）、错误场景（文件不存在 / 除零 / 无匹配）。
+
+## 代码质量
+
+| 检查 | 现状 |
+|---|---|
+| 测试 | **66 个**，覆盖率 **82%** |
+| lint（ruff） | 通过（规则与例外写在 §pyproject.toml§） |
+| 类型检查（mypy） | 通过：10 个文件 0 错误，随包发布 §py.typed§ |
+| 评测 | 19 条任务，CI 跑离线自检 |
+| CI | Python 3.11 / 3.12 / 3.13 三版本矩阵 |
 
 ## Interview Talking Points
 

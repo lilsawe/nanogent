@@ -29,7 +29,8 @@ def test_registry_reports_unknown_tool() -> None:
 
 
 def test_default_registry_exposes_expected_tools() -> None:
-    registry = create_default_registry()
+    # 显式关闭插件发现：本机若安装了第三方工具插件，结果才可复现
+    registry = create_default_registry(plugins=False)
 
     assert set(registry.tools) == {
         "execute_python",

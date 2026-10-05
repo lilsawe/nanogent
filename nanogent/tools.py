@@ -7,22 +7,26 @@ built-in tools: execute_python, read_file, write_file, calculator, web_search.
 
 from __future__ import annotations
 
+import ast
+import asyncio
 import inspect
 import json
+import logging
 import math
+import operator
 import os
 import re
 import subprocess
 import sys
 import types
 import typing
-from importlib.metadata import entry_points
-import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from importlib.metadata import entry_points
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Tool definition
@@ -103,7 +107,7 @@ class ExecutePythonTool(Tool):
         try:
             proc = await _run_subprocess(
                 [sys.executable, "-c", code],
-                timeout=10,
+                timeout_seconds=10,
             )
             output = proc["stdout"]
             if proc["stderr"]:
@@ -144,21 +148,26 @@ class ReadFileTool(Tool):
         }
 
     async def execute(self, path: str, **kwargs: Any) -> str:
+        def _read() -> str:
+            with open(os.path.expanduser(path), encoding="utf-8") as handle:
+                return handle.read()
+
         try:
-            with open(os.path.expanduser(path), "r", encoding="utf-8") as f:
-                content = f.read()
-            if not content:
-                return "(file is empty)"
-            # Truncate if too long to avoid blowing up context
-            if len(content) > 8000:
-                content = content[:8000] + "\n... (truncated)"
-            return content
+            # 文件 IO 是阻塞的，放到线程里执行，避免卡住事件循环
+            content = await asyncio.to_thread(_read)
         except FileNotFoundError:
             return f"Error: file not found: {path}"
         except PermissionError:
             return f"Error: permission denied: {path}"
         except Exception as e:
             return f"Error reading file: {e}"
+        else:
+            if not content:
+                return "(file is empty)"
+            # Truncate if too long to avoid blowing up context
+            if len(content) > 8000:
+                content = content[:8000] + "\n... (truncated)"
+            return content
 
 
 class WriteFileTool(Tool):
@@ -194,18 +203,81 @@ class WriteFileTool(Tool):
         }
 
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
-        try:
+        def _write() -> None:
             expanded = os.path.expanduser(path)
             os.makedirs(os.path.dirname(expanded) or ".", exist_ok=True)
-            with open(expanded, "w", encoding="utf-8") as f:
-                f.write(content)
+            with open(expanded, "w", encoding="utf-8") as handle:
+                handle.write(content)
+
+        try:
+            await asyncio.to_thread(_write)
             return f"File written successfully: {path} ({len(content)} characters)"
         except Exception as e:
             return f"Error writing file: {e}"
 
 
+#: 允许的二元运算符（AST 节点 -> 实现）
+_SAFE_BINARY_OPS: dict[type, Any] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+#: 允许的一元运算符
+_SAFE_UNARY_OPS: dict[type, Any] = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+#: 可用的数学函数与常量（只暴露 math 模块的公开成员 + 少量内置函数）
+_SAFE_NAMES: dict[str, Any] = {
+    name: getattr(math, name) for name in dir(math) if not name.startswith("_")
+}
+_SAFE_NAMES.update({"abs": abs, "round": round, "min": min, "max": max})
+
+
+def _eval_ast(node: ast.AST) -> Any:
+    """
+    在**白名单**下求值表达式 AST。
+
+    只允许数字常量、四则与幂运算、一元正负号、白名单内的名称与函数调用。
+    属性访问、下标、推导式、lambda、赋值等一律拒绝——因此
+    "().__class__.__bases__" 这类逃逸写法拿不到任何东西。
+    """
+    if isinstance(node, ast.Expression):
+        return _eval_ast(node.body)
+
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+            return node.value
+        raise TypeError(f"不支持的常量类型: {type(node.value).__name__}")
+
+    if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_BINARY_OPS:
+        return _SAFE_BINARY_OPS[type(node.op)](_eval_ast(node.left), _eval_ast(node.right))
+
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_UNARY_OPS:
+        return _SAFE_UNARY_OPS[type(node.op)](_eval_ast(node.operand))
+
+    if isinstance(node, ast.Name):
+        if node.id in _SAFE_NAMES:
+            return _SAFE_NAMES[node.id]
+        raise ValueError(f"未知名称: {node.id}")
+
+    if isinstance(node, ast.Call):
+        func = _eval_ast(node.func)
+        if not callable(func):
+            raise TypeError("调用目标不可调用")
+        return func(*[_eval_ast(arg) for arg in node.args])
+
+    raise ValueError(f"不支持的表达式: {type(node).__name__}")
+
+
 class CalculatorTool(Tool):
-    """Evaluate a mathematical expression safely."""
+    """在 AST 白名单下求值数学表达式（不使用 eval）。"""
 
     @property
     def name(self) -> str:
@@ -234,17 +306,9 @@ class CalculatorTool(Tool):
         }
 
     async def execute(self, expression: str, **kwargs: Any) -> str:
-        # Build a safe namespace with math functions
-        safe_namespace: dict[str, Any] = {
-            name: getattr(math, name)
-            for name in dir(math)
-            if not name.startswith("_")
-        }
-        safe_namespace["__builtins__"] = {}
-
         try:
-            result = eval(expression, {"__builtins__": {}}, safe_namespace)
-            return str(result)
+            tree = ast.parse(expression, mode="eval")
+            return str(_eval_ast(tree))
         except SyntaxError as e:
             return f"Syntax error in expression: {e}"
         except Exception as e:
@@ -387,19 +451,17 @@ def create_default_registry(
 
 async def _run_subprocess(
     cmd: list[str],
-    timeout: int = 10,
+    timeout_seconds: int = 10,
 ) -> dict[str, str]:
     """Run a subprocess asynchronously and return stdout + stderr."""
-    proc = await _async_subprocess_run(cmd, timeout)
+    proc = await _async_subprocess_run(cmd, timeout_seconds)
     return {"stdout": proc["stdout"], "stderr": proc["stderr"]}
 
 
 async def _async_subprocess_run(
-    cmd: list[str], timeout: int
+    cmd: list[str], timeout_seconds: int
 ) -> dict[str, str]:
-    """Thin async wrapper around subprocess.run."""
-    import asyncio
-
+    """Thin async wrapper around subprocess.run（阻塞调用放到线程池）。"""
     loop = asyncio.get_running_loop()
 
     def _run() -> subprocess.CompletedProcess[str]:
@@ -407,7 +469,8 @@ async def _async_subprocess_run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=timeout_seconds,
+            check=False,
         )
 
     result = await loop.run_in_executor(None, _run)
@@ -417,8 +480,8 @@ async def _async_subprocess_run(
 class GlobFilesTool(Tool):
     """Find files by glob pattern (e.g. **/*.py)."""
 
-    MAX_RESULTS = 200
-    SKIP_DIRS = {
+    MAX_RESULTS: ClassVar[int] = 200
+    SKIP_DIRS: ClassVar[set[str]] = {
         ".git", ".venv", "venv", "__pycache__", "node_modules",
         ".idea", ".vscode", "target", "dist", "build", ".mypy_cache", ".pytest_cache",
     }
@@ -452,20 +515,28 @@ class GlobFilesTool(Tool):
         }
 
     async def execute(self, pattern: str, path: str = ".", **kwargs: Any) -> str:
-        root = Path(os.path.expanduser(path or "."))
-        if not root.exists():
-            return f"Error: directory not found: {path}"
-        if not root.is_dir():
-            return f"Error: not a directory: {path}"
-
-        matches: list[Path] = []
-        try:
+        def _collect() -> tuple[Path, list[Path]]:
+            root = Path(os.path.expanduser(path or "."))
+            if not root.exists():
+                raise FileNotFoundError(path)
+            if not root.is_dir():
+                raise NotADirectoryError(path)
+            found: list[Path] = []
             for candidate in root.glob(pattern):
                 if not candidate.is_file():
                     continue
                 if any(part in self.SKIP_DIRS for part in candidate.parts):
                     continue
-                matches.append(candidate)
+                found.append(candidate)
+            return root, found
+
+        try:
+            # 路径解析与目录遍历都是阻塞 IO，放到线程里执行
+            root, matches = await asyncio.to_thread(_collect)
+        except FileNotFoundError:
+            return f"Error: directory not found: {path}"
+        except NotADirectoryError:
+            return f"Error: not a directory: {path}"
         except Exception as exc:
             return f"Error: invalid glob pattern '{pattern}': {exc}"
 
@@ -483,10 +554,10 @@ class GlobFilesTool(Tool):
 class GrepFilesTool(Tool):
     """Search file contents with a regular expression."""
 
-    MAX_RESULTS = 100
-    MAX_FILE_BYTES = 1_000_000
+    MAX_RESULTS: ClassVar[int] = 100
+    MAX_FILE_BYTES: ClassVar[int] = 1_000_000
     SKIP_DIRS = GlobFilesTool.SKIP_DIRS
-    SKIP_SUFFIXES = {
+    SKIP_SUFFIXES: ClassVar[set[str]] = {
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz",
         ".jar", ".class", ".so", ".dylib", ".pyc", ".woff", ".woff2", ".mp4", ".mov",
     }
@@ -533,28 +604,35 @@ class GrepFilesTool(Tool):
 
     async def execute(self, pattern: str, path: str = ".", include: str | None = None,
                       max_results: int | None = None, **kwargs: Any) -> str:
-        root = Path(os.path.expanduser(path or "."))
-        if not root.exists() or not root.is_dir():
-            return f"Error: not a directory: {path}"
-
         try:
             regex = re.compile(pattern)
         except re.error as exc:
             return f"Error: invalid regular expression: {exc}"
 
         limit = int(max_results) if max_results else self.MAX_RESULTS
-        results: list[str] = []
-        for candidate in self._iter_files(root, include):
-            try:
-                text = candidate.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
-                continue
-            for lineno, line in enumerate(text.splitlines(), start=1):
-                if regex.search(line):
-                    results.append(f"{candidate}:{lineno}: {line.strip()[:200]}")
-                    if len(results) >= limit:
-                        results.append(f"... (stopped at {limit} matches)")
-                        return "\n".join(results)
+
+        def _search() -> tuple[Path, list[str]]:
+            root = Path(os.path.expanduser(path or "."))
+            if not root.exists() or not root.is_dir():
+                raise NotADirectoryError(path)
+            hits: list[str] = []
+            for candidate in self._iter_files(root, include):
+                try:
+                    text = candidate.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                for lineno, content in enumerate(text.splitlines(), start=1):
+                    if regex.search(content):
+                        hits.append(f"{candidate}:{lineno}: {content.strip()[:200]}")
+                        if len(hits) >= limit:
+                            hits.append(f"... (stopped at {limit} matches)")
+                            return root, hits
+            return root, hits
+
+        try:
+            root, results = await asyncio.to_thread(_search)
+        except NotADirectoryError:
+            return f"Error: not a directory: {path}"
         return "\n".join(results) if results else f"No matches for '{pattern}' under {root}"
 
 
@@ -677,9 +755,9 @@ class FunctionTool(Tool):
             raise TypeError("FunctionTool 需要一个可调用对象")
         summary, _ = _docstring_parts(fn)
         self._fn = fn
-        self._name = name or getattr(fn, "__name__", "unnamed_tool")
-        self._description = description or summary or f"调用 {self._name}"
-        self._parameters = parameters or schema_from_callable(fn)
+        self._name: str = name or str(getattr(fn, "__name__", "unnamed_tool"))
+        self._description: str = description or summary or f"调用 {self._name}"
+        self._parameters: dict[str, Any] = parameters or schema_from_callable(fn)
 
     @property
     def name(self) -> str:
@@ -702,9 +780,11 @@ class FunctionTool(Tool):
             return f"Error: {type(exc).__name__}: {exc}"
         if inspect.isawaitable(result):
             result = await result
+        if result is None:
+            return ""
         if isinstance(result, str):
             return result
-        return json.dumps(result, ensure_ascii=False, default=str)
+        return str(json.dumps(result, ensure_ascii=False, default=str))
 
 
 def tool(fn: Any = None, *, name: str | None = None, description: str | None = None):
@@ -751,15 +831,13 @@ def load_plugin_tools(group: str = PLUGIN_ENTRY_POINT_GROUP) -> list[Tool]:
     安装后即被自动发现（加载失败的插件会被跳过，不影响主流程）。
     """
     tools: list[Tool] = []
-    try:
-        discovered = entry_points(group=group)
-    except TypeError:  # pragma: no cover - 旧版本 API 兼容
-        discovered = entry_points().get(group, [])  # type: ignore[attr-defined]
+    discovered = entry_points(group=group)
 
     for entry_point in discovered:
         try:
             loaded = entry_point.load()
-        except Exception:
+        except Exception as exc:  # 插件加载失败不应影响主流程
+            logger.debug("跳过加载失败的插件 %s: %s", entry_point.name, exc)
             continue
         tools.extend(_as_tools(loaded))
     return tools

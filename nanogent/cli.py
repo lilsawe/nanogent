@@ -191,7 +191,8 @@ async def run_repl(agent, tools, args: argparse.Namespace) -> int:
 
     while True:
         try:
-            user_input = input(f"{Colors.CYAN}You > {Colors.RESET}").strip()
+            # input() 是阻塞调用，放到线程里，避免卡住事件循环
+            user_input = (await asyncio.to_thread(input, f"{Colors.CYAN}You > {Colors.RESET}")).strip()
         except (EOFError, KeyboardInterrupt):
             print("\nBye!")
             break
@@ -219,7 +220,8 @@ async def run_repl(agent, tools, args: argparse.Namespace) -> int:
                 if not items:
                     print(f"{Colors.DIM}（暂无会话）{Colors.RESET}")
                 for item in items:
-                    print(f"  {Colors.GREEN}{item['name']}{Colors.RESET} - {item['message_count']} 条消息 - {item['saved_at']}")
+                    label = f"  {Colors.GREEN}{item['name']}{Colors.RESET}"
+                    print(f"{label} - {item['message_count']} 条消息 - {item['saved_at']}")
             elif cmd == "/help":
                 print_help()
             else:
@@ -265,7 +267,7 @@ async def amain(args: argparse.Namespace) -> int:
     trace_path = Path.home() / ".nanogent" / "traces" / f"run-{int(time.time())}.jsonl"
 
     try:
-        agent, tools, llm = build_agent(args, trace_path=trace_path)
+        agent, tools, _llm = build_agent(args, trace_path=trace_path)
     except ValueError as exc:
         print(f"{Colors.RED}{exc}{Colors.RESET}", file=sys.stderr)
         print("\n可用的 API Key 环境变量：NANOGENT_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY", file=sys.stderr)

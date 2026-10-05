@@ -4,7 +4,6 @@ __version__ = "0.2.0"
 
 from nanogent.agent import Agent
 from nanogent.llm import LLMClient
-from nanogent.tracing import TraceRecorder
 from nanogent.session import SessionStore
 from nanogent.tools import (
     FunctionTool,
@@ -16,16 +15,17 @@ from nanogent.tools import (
     schema_from_callable,
     tool,
 )
+from nanogent.tracing import TraceRecorder
 
 __all__ = [
-    "__version__",
     "Agent",
+    "FunctionTool",
     "LLMClient",
-    "TraceRecorder",
+    "SessionStore",
     "Tool",
     "ToolRegistry",
-    "FunctionTool",
-    "SessionStore",
+    "TraceRecorder",
+    "__version__",
     "builtin_tools",
     "create_default_registry",
     "load_plugin_tools",

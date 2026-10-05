@@ -1,0 +1,5 @@
+{
+  "service": "nanogent",
+  "port": 8080,
+  "idempotency": {"store": "memory"}
+}

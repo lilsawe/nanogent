@@ -18,7 +18,7 @@ from nanogent.tools import ToolRegistry
 from nanogent.tracing import TraceRecorder, preview
 
 if TYPE_CHECKING:
-    from nanogent.llm import LLMClient
+    from nanogent.llm import ChatModel
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ class Agent:
 
     def __init__(
         self,
-        llm: "LLMClient",
+        llm: ChatModel,
         tools: ToolRegistry,
         max_iterations: int = 10,
         system_prompt: str = SYSTEM_PROMPT,
