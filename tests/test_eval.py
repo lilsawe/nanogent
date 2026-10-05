@@ -1,6 +1,6 @@
 import asyncio
 
-from mini_agent.eval import EvalTask, run_eval_tasks
+from nanogent.eval import EvalTask, run_eval_tasks
 
 
 def test_offline_eval_generates_report(tmp_path) -> None:

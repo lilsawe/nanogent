@@ -1,5 +1,5 @@
 """
-Core agent loop — the heart of the mini-agent.
+Core agent loop — the heart of the nanogent.
 
 Implements the perception → thinking → action cycle:
 1. Receive user input (perception)
@@ -14,11 +14,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from mini_agent.tools import ToolRegistry
-from mini_agent.tracing import TraceRecorder, preview
+from nanogent.tools import ToolRegistry
+from nanogent.tracing import TraceRecorder, preview
 
 if TYPE_CHECKING:
-    from mini_agent.llm import LLMClient
+    from nanogent.llm import LLMClient
 
 
 # ---------------------------------------------------------------------------

@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mini-agent"
+name = "nanogent"
 version = "0.1.0"
-description = "A minimal AI agent framework built from scratch for learning and interviews."
+description = "nanogent - a minimal AI Agent Runtime built from scratch in Python (agent loop, function calling, tool registry, tracing, eval)."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,14 +18,14 @@ dev = [
 ]
 
 [project.scripts]
-mini-agent = "mini_agent.cli:run"
-mini-agent-eval = "mini_agent.eval:main"
+nanogent = "nanogent.cli:run"
+nanogent-eval = "nanogent.eval:main"
 
 [tool.setuptools]
-packages = ["mini_agent"]
+packages = ["nanogent"]
 
 [tool.setuptools.package-data]
-"mini_agent" = ["py.typed"]
+"nanogent" = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

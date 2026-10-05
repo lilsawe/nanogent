@@ -1,5 +1,5 @@
 """
-Tool system for the mini-agent.
+Tool system for the nanogent.
 
 Defines a Tool base class, a ToolRegistry for managing tools, and five
 built-in tools: execute_python, read_file, write_file, calculator, web_search.

@@ -1,7 +1,7 @@
 import asyncio
 import math
 
-from mini_agent.tools import CalculatorTool, ToolRegistry, create_default_registry
+from nanogent.tools import CalculatorTool, ToolRegistry, create_default_registry
 
 
 def test_calculator_supports_math_functions() -> None:

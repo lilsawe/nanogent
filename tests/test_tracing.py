@@ -3,9 +3,9 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from mini_agent.agent import Agent
-from mini_agent.tools import CalculatorTool, ToolRegistry
-from mini_agent.tracing import TraceRecorder
+from nanogent.agent import Agent
+from nanogent.tools import CalculatorTool, ToolRegistry
+from nanogent.tracing import TraceRecorder
 
 
 @dataclass

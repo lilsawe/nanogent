@@ -1,4 +1,4 @@
-"""Evaluation runner for Mini-Agent tool-calling behavior."""
+"""Evaluation runner for nanogent tool-calling behavior."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from mini_agent.agent import Agent
-from mini_agent.llm import LLMClient, LLMResponse, ToolCall
-from mini_agent.tools import create_default_registry
-from mini_agent.tracing import TraceRecorder
+from nanogent.agent import Agent
+from nanogent.llm import LLMClient, LLMResponse, ToolCall
+from nanogent.tools import create_default_registry
+from nanogent.tracing import TraceRecorder
 
 
 @dataclass
@@ -149,7 +149,7 @@ def write_reports(results: list[EvalResult], out_dir: Path) -> None:
 
     passed = sum(1 for result in results if result.passed)
     lines = [
-        "# Mini-Agent Eval Report",
+        "# nanogent Eval Report",
         "",
         f"Passed: {passed} / {len(results)}",
         "",
@@ -167,7 +167,7 @@ def write_reports(results: list[EvalResult], out_dir: Path) -> None:
 
 
 async def _amain(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run Mini-Agent evaluation tasks.")
+    parser = argparse.ArgumentParser(description="Run nanogent evaluation tasks.")
     parser.add_argument(
         "--tasks",
         default="evals/tool_call_tasks.jsonl",
@@ -188,7 +188,7 @@ async def _amain(argv: list[str] | None = None) -> int:
     tasks = load_tasks(args.tasks)
     results = await run_eval_tasks(tasks, offline=args.offline, out_dir=args.out_dir)
     passed = sum(1 for result in results if result.passed)
-    print(f"Mini-Agent eval: {passed}/{len(results)} passed")
+    print(f"nanogent eval: {passed}/{len(results)} passed")
     print(f"Report: {Path(args.out_dir) / 'eval_report.md'}")
     return 0 if passed == len(results) else 1
 

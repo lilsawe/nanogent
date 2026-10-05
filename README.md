@@ -1,8 +1,8 @@
-# Mini-Agent
+# nanogent
 
 > A minimal AI Agent Runtime built from scratch in Python — agent loop, function calling, tool registry, JSONL tracing, and an evaluation harness.
 
-[![CI](https://github.com/lilsawe/mini-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lilsawe/mini-agent/actions/workflows/ci.yml)
+[![CI](https://github.com/lilsawe/nanogent/actions/workflows/ci.yml/badge.svg)](https://github.com/lilsawe/nanogent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![Agent Runtime](https://img.shields.io/badge/Agent-Runtime-6f42c1.svg)](#architecture)
@@ -55,7 +55,7 @@ Agent.run()
 
 ```text
 .
-├── mini_agent/
+├── nanogent/
 │   ├── __init__.py       # Public package exports
 │   ├── __main__.py       # Enables module execution
 │   ├── cli.py            # CLI / REPL entrypoint
@@ -77,8 +77,8 @@ Agent.run()
 Using conda:
 
 ```bash
-conda create -n mini-agent python=3.11
-conda activate mini-agent
+conda create -n nanogent python=3.11
+conda activate nanogent
 pip install -e ".[dev]"
 ```
 
@@ -92,7 +92,7 @@ export DEEPSEEK_API_KEY="your-deepseek-api-key"
 ### 3. Run the agent
 
 ```bash
-mini-agent
+nanogent
 ```
 
 Example prompts:
@@ -118,7 +118,7 @@ Example prompts:
 Run the offline evaluation pipeline:
 
 ```bash
-mini-agent-eval --offline --tasks evals/tool_call_tasks.jsonl --out-dir eval_runs
+nanogent-eval --offline --tasks evals/tool_call_tasks.jsonl --out-dir eval_runs
 ```
 
 Offline mode uses a deterministic scripted LLM, so it does not need an API key.
@@ -156,7 +156,7 @@ The tests use fake/scripted LLMs, so they do not require a real API key.
 
 ### Agent loop
 
-`mini_agent/agent.py` keeps the conversation state and repeatedly calls the LLM until it receives a final text response or reaches the iteration limit. When the LLM returns tool calls, the agent executes them through `ToolRegistry` and appends results back into the message history.
+`nanogent/agent.py` keeps the conversation state and repeatedly calls the LLM until it receives a final text response or reaches the iteration limit. When the LLM returns tool calls, the agent executes them through `ToolRegistry` and appends results back into the message history.
 
 When a `TraceRecorder` is attached, the loop records each LLM request/response,
 tool call, tool result, and final answer as JSONL events. This makes it easier
@@ -175,11 +175,11 @@ This mirrors OpenAI-compatible function calling while keeping the implementation
 
 ### LLM client
 
-`mini_agent/llm.py` wraps the OpenAI SDK and points it at DeepSeek's compatible endpoint. The wrapper normalizes model responses into a small `LLMResponse` dataclass so the rest of the project does not depend on SDK-specific response objects.
+`nanogent/llm.py` wraps the OpenAI SDK and points it at DeepSeek's compatible endpoint. The wrapper normalizes model responses into a small `LLMResponse` dataclass so the rest of the project does not depend on SDK-specific response objects.
 
 ### Eval runner
 
-`mini_agent/eval.py` loads JSONL tasks, runs them through the same Agent loop,
+`nanogent/eval.py` loads JSONL tasks, runs them through the same Agent loop,
 checks expected tool usage and answer substrings, then emits a Markdown report
 plus machine-readable JSON results.
 

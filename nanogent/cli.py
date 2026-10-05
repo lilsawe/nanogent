@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Mini-Agent CLI — a minimal but complete AI agent you can run locally.
+nanogent CLI — a minimal but complete AI agent you can run locally.
 
 Usage:
     export DEEPSEEK_API_KEY="your-deepseek-api-key"
-    mini-agent
+    nanogent
 
 Then type your requests. The agent will use tools (execute code, read/write
 files, calculate, search) to help you. Type /quit to exit, /reset to clear
@@ -23,9 +23,9 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from mini_agent.agent import Agent
-from mini_agent.llm import LLMClient
-from mini_agent.tools import create_default_registry
+from nanogent.agent import Agent
+from nanogent.llm import LLMClient
+from nanogent.tools import create_default_registry
 
 
 # ---------------------------------------------------------------------------
@@ -44,14 +44,11 @@ class Colors:
 
 def print_banner() -> None:
     print(Colors.CYAN + r"""
-  __  __ _       _         ___                  _
- |  \/  (_)     (_)       / _ \                | |
- | \  / |_ _ __  _ ______/ /_\ \ __ _  ___ _ __ | |_
- | |\/| | | '_ \| |______|  _  |/ _` |/ _ \ '_ \| __|
- | |  | | | | | | |      | | | | (_| |  __/ | | | |_
- |_|  |_|_|_| |_|_|      \_| |_/\__, |\___|_| |_|\__|
-                                  __/ |
-                                 |___/
+ _ __   __ _ _ __   ___   __ _  ___ _ __ | |_
+| '_ \ / _` | '_ \ / _ \ / _` |/ _ \ '_ \| __|
+| | | | (_| | | | | (_) | (_| |  __/ | | | |_
+|_| |_|\__,_|_| |_|\___/ \__, |\___|_| |_|\__|
+                         |___/
     """ + Colors.RESET)
     print(Colors.DIM + "  Type /help for commands, /quit to exit\n" + Colors.RESET)
 
