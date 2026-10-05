@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nanogent"
-version = "0.1.0"
+version = "0.2.0"
 description = "nanogent - a minimal AI Agent Runtime built from scratch in Python (agent loop, function calling, tool registry, tracing, eval)."
 readme = "README.md"
 requires-python = ">=3.11"

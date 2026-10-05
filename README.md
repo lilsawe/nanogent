@@ -13,12 +13,25 @@
 
 这个项目不是对 LangChain、CrewAI 等成熟框架的封装。代码刻意保持可读，方便快速看到 Agent loop、tool registry、function calling、异步执行、JSONL trace 和 evaluation harness 的具体实现。
 
+## 60 秒上手
+
+§§§bash
+pip install -e .                     # 或 pipx install .
+export NANOGENT_API_KEY=sk-xxx       # 也支持 DEEPSEEK_API_KEY / OPENAI_API_KEY
+
+nanogent "把 data.csv 里的空值统计出来"        # 单次执行，跑完即退
+cat app.log | nanogent "这段日志的根因是什么？"  # 管道输入
+nanogent --json "..."                          # 结构化输出，喂给脚本
+nanogent                                        # 交互模式
+§§§
+
+不需要配置文件、不需要起服务、不需要 Docker——装完就能用。
 ## Highlights
 
 - 从零实现 `perceive -> think -> act -> observe` Agent 循环
 - 基于 DeepSeek 的 OpenAI-compatible function calling
 - 可扩展工具系统：抽象 `Tool` 基类、注册表、统一 JSON Schema 描述
-- 内置 5 个工具：Python 执行、文件读写、计算器、模拟搜索
+- 内置 **7 个工具**：Python 执行、文件读写、计算器、模拟搜索、**glob（按模式找文件）**、**grep（正则搜内容）**
 - 支持多轮对话上下文和 `/reset` 重置
 - 使用 `asyncio` 封装 LLM 调用和工具执行
 - JSONL tracing：记录 user message、LLM request/response、tool_call、tool_result、final_response
@@ -86,7 +99,7 @@ pip install -e ".[dev]"
 
 ```bash
 cp .env.example .env
-export DEEPSEEK_API_KEY="your-deepseek-api-key"
+export NANOGENT_API_KEY="your-api-key"   # 也支持 DEEPSEEK_API_KEY / OPENAI_API_KEY
 ```
 
 ### 3. Run the agent
@@ -104,6 +117,43 @@ Example prompts:
 帮我分析一下：1 米/秒 的风速下，一个半径 5 米的水平轴风力发电机理论功率是多少？用贝茨极限算。
 ```
 
+## 三种用法
+
+| 场景 | 命令 | 说明 |
+|---|---|---|
+| **交互** | §nanogent§ | REPL，支持 §/tools§ §/save§ §/sessions§ §/reset§ |
+| **单次** | §nanogent "任务"§ | 跑完即退，适合写进脚本/CI |
+| **管道** | §cat x | nanogent "分析"§ | stdin 自动作为输入内容拼进 prompt |
+
+## 脚本化输出
+
+§§§bash
+# 只要答案（适合管道/CI，无 banner 无颜色）
+nanogent -q "把 result.txt 里的数字求和"
+
+# 结构化 JSON：answer / model / elapsed_ms / tool_calls
+nanogent --json "统计 src 下的 Python 文件数"
+§§§
+
+§§§json
+{
+  "answer": "共 12 个 .py 文件",
+  "model": "deepseek-chat",
+  "elapsed_ms": 3210,
+  "tool_calls": 2,
+  "session": null
+}
+§§§
+
+## 会话（跨次对话）
+
+§§§bash
+nanogent --session refactor "先看一下 order.py 的结构"   # 保存到命名会话
+nanogent --continue "接着改：把幂等校验抽成独立函数"       # 继续最近一次会话
+nanogent --list-sessions                                # 列出所有会话
+§§§
+
+会话存于 §~/.nanogent/sessions/*.json§，纯文本可读、可 diff、可手动删。
 ## Commands
 
 ```text
@@ -192,6 +242,8 @@ plus machine-readable JSON results.
 | `write_file` | Creates or overwrites text files |
 | `calculator` | Evaluates math expressions with a restricted namespace |
 | `web_search` | Simulated search placeholder for demonstrating tool flow |
+| `glob` | Finds files by glob pattern (e.g. **/*.py), newest first, skips .git/venv/target |
+| `grep` | Regex search across files, returns file:line: text; supports include filter |
 
 ## Interview Talking Points
 

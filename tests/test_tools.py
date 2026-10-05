@@ -37,4 +37,6 @@ def test_default_registry_exposes_expected_tools() -> None:
         "write_file",
         "calculator",
         "web_search",
+        "glob",
+        "grep",
     }

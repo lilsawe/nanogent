@@ -10,11 +10,13 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -342,6 +344,8 @@ def create_default_registry() -> ToolRegistry:
     registry.register(WriteFileTool())
     registry.register(CalculatorTool())
     registry.register(WebSearchTool())
+    registry.register(GlobFilesTool())
+    registry.register(GrepFilesTool())
     return registry
 
 
@@ -376,3 +380,147 @@ async def _async_subprocess_run(
 
     result = await loop.run_in_executor(None, _run)
     return {"stdout": result.stdout, "stderr": result.stderr}
+
+
+class GlobFilesTool(Tool):
+    """Find files by glob pattern (e.g. **/*.py)."""
+
+    MAX_RESULTS = 200
+    SKIP_DIRS = {
+        ".git", ".venv", "venv", "__pycache__", "node_modules",
+        ".idea", ".vscode", "target", "dist", "build", ".mypy_cache", ".pytest_cache",
+    }
+
+    @property
+    def name(self) -> str:
+        return "glob"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Find files matching a glob pattern, e.g. '**/*.py' or 'src/**/*.java'. "
+            "Returns matching paths (newest first). Use this to locate files before reading them."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern, e.g. **/*.py",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Root directory to search in. Defaults to the current directory.",
+                },
+            },
+            "required": ["pattern"],
+        }
+
+    async def execute(self, pattern: str, path: str = ".", **kwargs: Any) -> str:
+        root = Path(os.path.expanduser(path or "."))
+        if not root.exists():
+            return f"Error: directory not found: {path}"
+        if not root.is_dir():
+            return f"Error: not a directory: {path}"
+
+        matches: list[Path] = []
+        try:
+            for candidate in root.glob(pattern):
+                if not candidate.is_file():
+                    continue
+                if any(part in self.SKIP_DIRS for part in candidate.parts):
+                    continue
+                matches.append(candidate)
+        except Exception as exc:
+            return f"Error: invalid glob pattern '{pattern}': {exc}"
+
+        if not matches:
+            return f"No files matched '{pattern}' under {root}"
+
+        matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        shown = matches[: self.MAX_RESULTS]
+        lines = [str(p) for p in shown]
+        if len(matches) > len(shown):
+            lines.append(f"... ({len(matches) - len(shown)} more files)")
+        return "\n".join(lines)
+
+
+class GrepFilesTool(Tool):
+    """Search file contents with a regular expression."""
+
+    MAX_RESULTS = 100
+    MAX_FILE_BYTES = 1_000_000
+    SKIP_DIRS = GlobFilesTool.SKIP_DIRS
+    SKIP_SUFFIXES = {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz",
+        ".jar", ".class", ".so", ".dylib", ".pyc", ".woff", ".woff2", ".mp4", ".mov",
+    }
+
+    @property
+    def name(self) -> str:
+        return "grep"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Search file contents with a regular expression (Python re syntax). "
+            "Returns matches as 'file:line: text'. Optional 'include' filters file names, e.g. '*.py'."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Regular expression to search for."},
+                "path": {"type": "string", "description": "Root directory. Defaults to the current directory."},
+                "include": {"type": "string", "description": "Only search files matching this glob, e.g. *.py"},
+                "max_results": {"type": "integer", "description": "Maximum matches to return (default 100)."},
+            },
+            "required": ["pattern"],
+        }
+
+    def _iter_files(self, root: Path, include: str | None):
+        candidates = root.rglob(include) if include else root.rglob("*")
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            if any(part in self.SKIP_DIRS for part in candidate.parts):
+                continue
+            if candidate.suffix.lower() in self.SKIP_SUFFIXES:
+                continue
+            try:
+                if candidate.stat().st_size > self.MAX_FILE_BYTES:
+                    continue
+            except OSError:
+                continue
+            yield candidate
+
+    async def execute(self, pattern: str, path: str = ".", include: str | None = None,
+                      max_results: int | None = None, **kwargs: Any) -> str:
+        root = Path(os.path.expanduser(path or "."))
+        if not root.exists() or not root.is_dir():
+            return f"Error: not a directory: {path}"
+
+        try:
+            regex = re.compile(pattern)
+        except re.error as exc:
+            return f"Error: invalid regular expression: {exc}"
+
+        limit = int(max_results) if max_results else self.MAX_RESULTS
+        results: list[str] = []
+        for candidate in self._iter_files(root, include):
+            try:
+                text = candidate.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                if regex.search(line):
+                    results.append(f"{candidate}:{lineno}: {line.strip()[:200]}")
+                    if len(results) >= limit:
+                        results.append(f"... (stopped at {limit} matches)")
+                        return "\n".join(results)
+        return "\n".join(results) if results else f"No matches for '{pattern}' under {root}"

@@ -9,6 +9,17 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+API_KEY_ENV_VARS = ("NANOGENT_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY")
+
+
+def _first_env(names: tuple[str, ...]) -> str | None:
+    """Return the first environment variable that is set and non-empty."""
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return None
+
 from openai import AsyncOpenAI
 
 
@@ -43,25 +54,26 @@ class LLMClient:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "deepseek-chat",
-        base_url: str = "https://api.deepseek.com",
+        model: str | None = None,
+        base_url: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
     ):
-        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+        self.api_key = api_key or _first_env(API_KEY_ENV_VARS)
         if not self.api_key:
             raise ValueError(
-                "DEEPSEEK_API_KEY not found. Set it as an environment variable "
-                "or pass api_key= to the constructor."
+                "No API key found. Set one of " + ", ".join(API_KEY_ENV_VARS)
+                + " (e.g. export NANOGENT_API_KEY=sk-...), or pass --api-key."
             )
 
-        self.model = model
+        self.model = model or os.getenv("NANOGENT_MODEL", "deepseek-chat")
+        self.base_url = base_url or os.getenv("NANOGENT_BASE_URL", "https://api.deepseek.com")
         self.temperature = temperature
         self.max_tokens = max_tokens
 
         self._client = AsyncOpenAI(
             api_key=self.api_key,
-            base_url=base_url,
+            base_url=self.base_url,
         )
 
     async def chat(
