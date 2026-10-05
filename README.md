@@ -1,5 +1,7 @@
 # Mini-Agent
 
+> A minimal AI Agent Runtime built from scratch in Python — agent loop, function calling, tool registry, JSONL tracing, and an evaluation harness.
+
 [![CI](https://github.com/lilsawe/mini-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lilsawe/mini-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
@@ -204,3 +206,31 @@ plus machine-readable JSON results.
 ## Security Notes
 
 This is a local learning project. `execute_python` runs code in a subprocess, but it is not a full security sandbox. In production, code execution and file writing should be isolated with stricter permissions, path allowlists, resource limits, and explicit user confirmation.
+
+## 设计取舍 / 已知限制 / 下一步
+
+### 设计取舍（为什么这么做）
+
+| 决策 | 选择 | 为什么 |
+|---|---|---|
+| 实现方式 | 从零手写，不封装 LangChain / CrewAI | 目标是**看清 Agent loop 的真实实现**，封装会遮蔽核心 |
+| 观测方式 | 自研 JSONL tracing，不用 OpenTelemetry | 零依赖、可直接 diff 与断言，适合教学与面试演示 |
+| 交互形态 | CLI / REPL，不做 Web UI | 降低运行门槛；前端不是本项目要证明的能力 |
+| 工具系统 | 抽象 Tool 基类 + 注册表 + JSON Schema | 新增工具只需实现一个类，体现可扩展设计 |
+| 模型接入 | 走 OpenAI-compatible 协议（默认 DeepSeek） | 换模型只改环境变量，不绑死供应商 |
+
+### 已知限制（诚实说明）
+
+- **单进程单会话**：没有并发、多用户隔离与鉴权
+- **无持久化记忆**：上下文只存在内存里，重启即丢
+- **无重试 / 限流 / 成本控制**：LLM 调用失败直接抛出
+- **工具沙箱很弱**：Python 执行工具仅做基础限制，不能用于不可信输入
+- **评测集规模小**：eval 只覆盖工具调用链路的少量任务，不是 benchmark
+
+### 下一步（如果继续做）
+
+1. 支持 MCP（Model Context Protocol），接入外部工具生态
+2. 记忆持久化（向量检索 + 会话摘要），支持长对话
+3. 流式输出与工具调用并行，降低首字延迟
+4. 评测集扩展为多步任务，输出通过率趋势
+5. 增加 token / 成本统计与限流保护
