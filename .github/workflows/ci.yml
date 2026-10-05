@@ -26,3 +26,12 @@ jobs:
           pip install -e ".[dev]"
       - name: Run tests
         run: pytest -q
+
+      - name: Verify plugin discovery (entry_points)
+        run: |
+          pip install -e examples/plugin_weather
+          nanogent --tools | tee /tmp/tools.txt
+          grep -q "weather" /tmp/tools.txt
+          grep -q "\[plugin\]" /tmp/tools.txt
+          if nanogent --tools --no-plugins | grep -q "weather"; then echo "plugins should be disabled"; exit 1; fi
+          python examples/custom_tool.py --dry-run > /dev/null

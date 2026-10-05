@@ -32,7 +32,7 @@ from nanogent import __version__
 from nanogent.agent import Agent
 from nanogent.llm import LLMClient
 from nanogent.session import SessionStore
-from nanogent.tools import create_default_registry
+from nanogent.tools import create_default_registry, load_plugin_tools
 from nanogent.tracing import TraceRecorder
 
 
@@ -106,6 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--continue", dest="resume", action="store_true", help="继续最近一次会话")
     parser.add_argument("--list-sessions", action="store_true", help="列出已保存会话后退出")
     parser.add_argument("--tools", action="store_true", help="列出可用工具后退出")
+    parser.add_argument("--no-plugins", action="store_true", help="不加载第三方工具插件")
     parser.add_argument("--version", action="version", version=f"nanogent {__version__}")
     return parser
 
@@ -133,7 +134,7 @@ def compose_prompt(parts: list[str], stdin_text: str | None) -> str | None:
 
 def build_agent(args: argparse.Namespace, trace_path: Path | None = None):
     llm = LLMClient(api_key=args.api_key, model=args.model, base_url=args.base_url)
-    tools = create_default_registry()
+    tools = create_default_registry(plugins=not getattr(args, "no_plugins", False))
     tracer = TraceRecorder(path=trace_path) if trace_path else None
     agent = Agent(llm=llm, tools=tools, max_iterations=args.max_iterations, tracer=tracer)
     agent.reset()
@@ -250,8 +251,12 @@ async def amain(args: argparse.Namespace) -> int:
         return 0
 
     if args.tools:
-        for tool in create_default_registry().tools.values():
-            print(f"{tool.name}\t{tool.description.splitlines()[0][:100]}")
+        plugin_names = set()
+        if not args.no_plugins:
+            plugin_names = {t.name for t in load_plugin_tools()}
+        for tool in create_default_registry(plugins=not args.no_plugins).tools.values():
+            source = "plugin" if tool.name in plugin_names else "builtin"
+            print(f"{tool.name}\t[{source}]\t{tool.description.splitlines()[0][:90]}")
         return 0
 
     stdin_text = read_piped_stdin()

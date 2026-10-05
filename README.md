@@ -30,13 +30,16 @@ nanogent                                        # 交互模式
 
 - 从零实现 `perceive -> think -> act -> observe` Agent 循环
 - 基于 DeepSeek 的 OpenAI-compatible function calling
+- **既是一个库，也是一个 CLI**：`from nanogent import Agent` 直接嵌进你的程序（PEP 561 类型标注）
+- **函数即工具**：一个 `@tool` 装饰器，Schema 由类型注解与 docstring 自动生成
+- **插件式工具发现**：第三方包声明 entry point，装完即被自动发现（`nanogent --tools` 标注 `[plugin]`）
 - 可扩展工具系统：抽象 `Tool` 基类、注册表、统一 JSON Schema 描述
 - 内置 **7 个工具**：Python 执行、文件读写、计算器、模拟搜索、**glob（按模式找文件）**、**grep（正则搜内容）**
 - 支持多轮对话上下文和 `/reset` 重置
 - 使用 `asyncio` 封装 LLM 调用和工具执行
 - JSONL tracing：记录 user message、LLM request/response、tool_call、tool_result、final_response
 - Evaluation harness：用 JSONL 任务集评估工具调用链路，输出 JSON + Markdown 报告
-- 带单元测试，覆盖工具注册、计算器安全边界、Agent tool-call、tracing 和 eval 流程
+- **44 个单元测试**，覆盖工具系统（含函数工具与插件发现）、计算器安全边界、Agent tool-call、tracing、eval、会话与 CLI
 
 ## Architecture
 
@@ -117,6 +120,69 @@ Example prompts:
 帮我分析一下：1 米/秒 的风速下，一个半径 5 米的水平轴风力发电机理论功率是多少？用贝茨极限算。
 ```
 
+## 作为库使用
+
+nanogent **首先是一个库**，§pip install§ 之后可以直接嵌进你的程序：
+
+§§§python
+import asyncio
+from nanogent import Agent, LLMClient, create_default_registry
+
+agent = Agent(llm=LLMClient(), tools=create_default_registry())
+agent.reset()
+print(asyncio.run(agent.run("把 data.csv 里的空值统计出来")))
+§§§
+
+完整示例见 §examples/custom_tool.py§。
+
+## 自定义工具：一行装饰器
+
+不需要手写 JSON Schema——**注解决定类型，docstring 决定描述**：
+
+§§§python
+from nanogent import tool, create_default_registry
+
+@tool
+def word_count(text: str) -> int:
+    """统计文本的单词数。
+
+    Args:
+        text: 待统计的文本
+    """
+    return len(text.split())
+
+registry = create_default_registry()
+registry.register(word_count)      # 注册即可用
+§§§
+
+自动生成的工具 Schema：
+
+§§§json
+{"type": "object",
+ "properties": {"text": {"type": "string", "description": "待统计的文本"}},
+ "required": ["text"]}
+§§§
+
+支持同步/异步函数、§list§/§dict§/§Optional§ 等注解，也兼容 §from __future__ import annotations§（字符串注解）。
+
+## 插件：第三方包自动提供工具
+
+第三方包只要声明 entry point，**安装后即被发现**：
+
+§§§toml
+[project.entry-points."nanogent.tools"]
+weather = "nanogent_weather.tools:ALL_TOOLS"
+§§§
+
+仓库里的 §examples/plugin_weather/§ 就是一个可直接安装的示例插件：
+
+§§§bash
+pip install -e examples/plugin_weather
+nanogent --tools              # 列表里会多出 weather  [plugin]
+nanogent --no-plugins         # 需要时可关闭插件发现
+§§§
+
+加载失败的插件会被**跳过**，不会影响主流程；CI 里也真的会安装这个示例插件并断言它被发现。
 ## 三种用法
 
 | 场景 | 命令 | 说明 |

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nanogent-weather-plugin"
+version = "0.1.0"
+description = "示例插件：给 nanogent 增加一个 weather 工具（演示 entry_points 插件机制）"
+requires-python = ">=3.11"
+dependencies = ["nanogent"]
+
+# 关键：声明插件入口。安装后 nanogent 会自动发现这些工具。
+[project.entry-points."nanogent.tools"]
+weather = "nanogent_weather.tools:ALL_TOOLS"
+
+[tool.setuptools]
+packages = ["nanogent_weather"]

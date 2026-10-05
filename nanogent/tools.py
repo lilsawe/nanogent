@@ -7,12 +7,16 @@ built-in tools: execute_python, read_file, write_file, calculator, web_search.
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 import os
 import re
 import subprocess
 import sys
+import types
+import typing
+from importlib.metadata import entry_points
 import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -336,16 +340,44 @@ class ToolRegistry:
 # Factory
 # ---------------------------------------------------------------------------
 
-def create_default_registry() -> ToolRegistry:
-    """Create a ToolRegistry pre-loaded with all built-in tools."""
+def builtin_tools() -> list[Tool]:
+    """全部内置工具。"""
+    return [
+        ExecutePythonTool(),
+        ReadFileTool(),
+        WriteFileTool(),
+        CalculatorTool(),
+        WebSearchTool(),
+        GlobFilesTool(),
+        GrepFilesTool(),
+    ]
+
+
+def create_default_registry(
+    *,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
+    plugins: bool = True,
+) -> ToolRegistry:
+    """
+    创建工具注册表。
+
+    Args:
+        include: 只加载这些工具名（None 表示全部）
+        exclude: 排除这些工具名
+        plugins: 是否发现第三方插件（entry_points 组 nanogent.tools）
+    """
     registry = ToolRegistry()
-    registry.register(ExecutePythonTool())
-    registry.register(ReadFileTool())
-    registry.register(WriteFileTool())
-    registry.register(CalculatorTool())
-    registry.register(WebSearchTool())
-    registry.register(GlobFilesTool())
-    registry.register(GrepFilesTool())
+    candidates = builtin_tools()
+    if plugins:
+        candidates = candidates + load_plugin_tools()
+
+    for candidate in candidates:
+        if include is not None and candidate.name not in include:
+            continue
+        if exclude is not None and candidate.name in exclude:
+            continue
+        registry.register(candidate)
     return registry
 
 
@@ -524,3 +556,210 @@ class GrepFilesTool(Tool):
                         results.append(f"... (stopped at {limit} matches)")
                         return "\n".join(results)
         return "\n".join(results) if results else f"No matches for '{pattern}' under {root}"
+
+
+# ---------------------------------------------------------------------------
+# Function tools（把普通函数变成工具）
+# ---------------------------------------------------------------------------
+
+PLUGIN_ENTRY_POINT_GROUP = "nanogent.tools"
+
+_JSON_TYPES: dict[Any, str] = {
+    str: "string",
+    int: "integer",
+    float: "number",
+    bool: "boolean",
+    list: "array",
+    dict: "object",
+}
+
+#: 注解被字符串化时的兜底（模块里写了 from __future__ import annotations 就会这样）
+_JSON_TYPES_BY_NAME: dict[str, str] = {
+    "str": "string",
+    "int": "integer",
+    "float": "number",
+    "bool": "boolean",
+    "list": "array",
+    "dict": "object",
+    "Any": "string",
+}
+
+
+def _resolved_hints(fn: Any) -> dict[str, Any]:
+    """解析函数注解；对字符串注解会尝试求值，失败则返回空表。"""
+    try:
+        return typing.get_type_hints(fn)
+    except Exception:
+        return {}
+
+
+def _json_type(annotation: Any) -> str:
+    """把 Python 类型注解映射成 JSON Schema 的 type。"""
+    if annotation is inspect.Parameter.empty or annotation is Any:
+        return "string"
+    if isinstance(annotation, str):  # 字符串注解（PEP 563 延迟求值）
+        return _JSON_TYPES_BY_NAME.get(annotation, "string")
+
+    origin = typing.get_origin(annotation)
+    if origin in (list, set, tuple, frozenset):
+        return "array"
+    if origin is dict:
+        return "object"
+    if origin in (typing.Union, types.UnionType):  # Optional[X] / X | None
+        args = [a for a in typing.get_args(annotation) if a is not type(None)]
+        if len(args) == 1:
+            return _json_type(args[0])
+        return "string"
+    return _JSON_TYPES.get(annotation, "string")
+
+
+def _docstring_parts(fn: Any) -> tuple[str, dict[str, str]]:
+    """取函数 docstring 的摘要行与 Args 段的参数说明。"""
+    doc = inspect.getdoc(fn) or ""
+    lines = doc.splitlines()
+    summary = lines[0].strip() if lines else ""
+    params: dict[str, str] = {}
+    in_args = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower() in ("args:", "arguments:", "parameters:", "参数:"):
+            in_args = True
+            continue
+        if in_args:
+            if not stripped:
+                continue
+            match = re.match(r"^(\w+)\s*(?:\([^)]*\))?\s*:\s*(.+)$", stripped)
+            if match:
+                params[match.group(1)] = match.group(2).strip()
+    return summary, params
+
+
+def schema_from_callable(fn: Any) -> dict[str, Any]:
+    """根据函数签名与类型注解，自动生成工具参数的 JSON Schema。"""
+    signature = inspect.signature(fn)
+    _, param_docs = _docstring_parts(fn)
+    hints = _resolved_hints(fn)
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+
+    for name, param in signature.parameters.items():
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        annotation = hints.get(name, param.annotation)
+        prop: dict[str, Any] = {"type": _json_type(annotation)}
+        if name in param_docs:
+            prop["description"] = param_docs[name]
+        properties[name] = prop
+        if param.default is inspect.Parameter.empty:
+            required.append(name)
+
+    return {"type": "object", "properties": properties, "required": required}
+
+
+class FunctionTool(Tool):
+    """
+    把普通函数（同步或异步）包装成 Tool。
+
+    参数 Schema 由类型注解与 docstring 自动生成：注解决定 JSON 类型，docstring 第一行
+    作为工具描述，Args 段落里「参数名: 说明」作为参数描述。因此写一个工具只需要写业务
+    逻辑本身，不需要手写 JSON Schema。
+    """
+
+    def __init__(
+        self,
+        fn: Any,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        parameters: dict[str, Any] | None = None,
+    ):
+        if not callable(fn):
+            raise TypeError("FunctionTool 需要一个可调用对象")
+        summary, _ = _docstring_parts(fn)
+        self._fn = fn
+        self._name = name or getattr(fn, "__name__", "unnamed_tool")
+        self._description = description or summary or f"调用 {self._name}"
+        self._parameters = parameters or schema_from_callable(fn)
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return self._description
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return self._parameters
+
+    async def execute(self, **kwargs: Any) -> str:
+        try:
+            result = self._fn(**kwargs)
+        except TypeError as exc:
+            return f"Error: 工具参数不匹配（{exc}）"
+        except Exception as exc:  # 工具异常不应让 Agent 崩掉
+            return f"Error: {type(exc).__name__}: {exc}"
+        if inspect.isawaitable(result):
+            result = await result
+        if isinstance(result, str):
+            return result
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+
+def tool(fn: Any = None, *, name: str | None = None, description: str | None = None):
+    """
+    装饰器：把函数注册为工具。
+
+        @tool                                  # 直接用函数名与 docstring
+        @tool(name="weather")                  # 自定义名字
+    """
+
+    def wrap(func: Any) -> FunctionTool:
+        return FunctionTool(func, name=name, description=description)
+
+    return wrap if fn is None else wrap(fn)
+
+
+# ---------------------------------------------------------------------------
+# 插件发现（第三方包通过 entry_points 提供工具）
+# ---------------------------------------------------------------------------
+
+def _as_tools(obj: Any) -> list[Tool]:
+    """把 entry point 加载出的对象统一成 Tool 列表。"""
+    if isinstance(obj, Tool):
+        return [obj]
+    if isinstance(obj, (list, tuple, set)):
+        collected: list[Tool] = []
+        for item in obj:
+            collected.extend(_as_tools(item))
+        return collected
+    if callable(obj):
+        return [FunctionTool(obj)]
+    return []
+
+
+def load_plugin_tools(group: str = PLUGIN_ENTRY_POINT_GROUP) -> list[Tool]:
+    """
+    发现已安装的第三方工具插件。
+
+    第三方包只要在 pyproject.toml 里声明：
+
+        [project.entry-points."nanogent.tools"]
+        my_tools = "my_package.tools:ALL_TOOLS"
+
+    安装后即被自动发现（加载失败的插件会被跳过，不影响主流程）。
+    """
+    tools: list[Tool] = []
+    try:
+        discovered = entry_points(group=group)
+    except TypeError:  # pragma: no cover - 旧版本 API 兼容
+        discovered = entry_points().get(group, [])  # type: ignore[attr-defined]
+
+    for entry_point in discovered:
+        try:
+            loaded = entry_point.load()
+        except Exception:
+            continue
+        tools.extend(_as_tools(loaded))
+    return tools
