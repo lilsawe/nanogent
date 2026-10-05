@@ -1,5 +1,11 @@
 # Mini-Agent
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![Agent Runtime](https://img.shields.io/badge/Agent-Runtime-6f42c1.svg)](#architecture)
+
+作者：[李耀彬 (Li Yaobin) · @lilsawe](https://github.com/lilsawe)　|　个人主页：https://github.com/lilsawe
+
 一个从零实现的轻量级 AI Agent Runtime，用少量 Python 代码展示 Agent 的核心工作流：LLM 推理、工具调用、工具结果回传、多轮对话、CLI 交互，以及 Agent 行为 tracing / eval。
 
 这个项目不是对 LangChain、CrewAI 等成熟框架的封装。代码刻意保持可读，方便快速看到 Agent loop、tool registry、function calling、异步执行、JSONL trace 和 evaluation harness 的具体实现。
