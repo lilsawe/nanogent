@@ -21,6 +21,12 @@ dev = [
 mini-agent = "mini_agent.cli:run"
 mini-agent-eval = "mini_agent.eval:main"
 
+[tool.setuptools]
+packages = ["mini_agent"]
+
+[tool.setuptools.package-data]
+"mini_agent" = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

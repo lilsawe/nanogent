@@ -1,5 +1,6 @@
 # Mini-Agent
 
+[![CI](https://github.com/lilsawe/mini-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lilsawe/mini-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![Agent Runtime](https://img.shields.io/badge/Agent-Runtime-6f42c1.svg)](#architecture)
