@@ -7,8 +7,6 @@ import builtins
 import json
 from types import SimpleNamespace
 
-import pytest
-
 from nanogent.cli import amain, build_parser
 from nanogent.errors import ConfigError
 from nanogent.tools import create_default_registry

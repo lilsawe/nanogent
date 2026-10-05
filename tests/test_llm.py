@@ -23,10 +23,10 @@ def _completion(content=None, tool_calls=None):
 def _client_with(return_value=None, side_effect=None) -> LLMClient:
     client = LLMClient(api_key="sk-test")
     create = AsyncMock(return_value=return_value, side_effect=side_effect)
-    client._client = SimpleNamespace(  # noqa: SLF001 - 测试里替换底层客户端
+    client._client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))
     )
-    client._create = create  # noqa: SLF001
+    client._create = create
     return client
 
 
@@ -82,7 +82,7 @@ def test_chat_passes_tools_when_provided():
 
     asyncio.run(client.chat([{"role": "user", "content": "hi"}], tools=tool_defs))
 
-    kwargs = client._create.await_args.kwargs  # noqa: SLF001
+    kwargs = client._create.await_args.kwargs
     assert kwargs["tools"] == tool_defs
     assert kwargs["tool_choice"] == "auto"
 
