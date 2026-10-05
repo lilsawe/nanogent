@@ -241,7 +241,7 @@ plus machine-readable JSON results.
 | `read_file` | Reads UTF-8 text files with output truncation |
 | `write_file` | Creates or overwrites text files |
 | `calculator` | Evaluates math expressions with a restricted namespace |
-| `web_search` | Simulated search placeholder for demonstrating tool flow |
+| `web_search` | Placeholder search tool that shows how a tool call flows through the loop |
 | `glob` | Finds files by glob pattern (e.g. **/*.py), newest first, skips .git/venv/target |
 | `grep` | Regex search across files, returns file:line: text; supports include filter |
 
@@ -249,7 +249,7 @@ plus machine-readable JSON results.
 
 - Why implement the Agent loop directly instead of hiding it behind a framework
 - How function calling maps to tool registration and tool result messages
-- Why the project uses async interfaces even though the demo is small
+- Why the project uses async interfaces even though the codebase is small
 - How iteration limits and structured error strings prevent simple failure loops
 - How JSONL traces help debug tool selection, tool failures, and loop behavior
 - How to turn prompt/task examples into repeatable Agent evals

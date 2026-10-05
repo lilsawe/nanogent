@@ -252,7 +252,7 @@ class WebSearchTool(Tool):
     Simulated web search tool.
 
     In a production agent this would call a real search API (Brave, SerpAPI,
-    etc.). Here it returns a placeholder to demonstrate the tool-calling flow
+    etc.). Here it returns a placeholder to show the tool-calling flow
     without requiring an additional API key.
     """
 
@@ -283,7 +283,7 @@ class WebSearchTool(Tool):
 
     async def execute(self, query: str, **kwargs: Any) -> str:
         # In production, integrate a real search API here.
-        # For the demo we return a clear placeholder so the agent knows the
+        # We return a clear placeholder so the agent knows the
         # tool was called but real search is not wired up.
         return (
             f"[Simulated search] Query: '{query}'\n"
